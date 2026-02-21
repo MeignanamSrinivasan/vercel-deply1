@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = 'https://vercel-deply1-ftiz1zuy0-meignanamsrinivasans-projects.vercel.app/api' || 'http://localhost:8000/api';
 
 function App() {
   const [prompt, setPrompt] = useState('');

@@ -5,23 +5,28 @@ const Groq = require("groq-sdk");
 
 const app = express();
 
-// ==========================================
-// ENVIRONMENT
-// ==========================================
+// ===============================
+// ENVIRONMENT VARIABLES
+// ===============================
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
-const PORT = process.env.PORT || 8000;
 
 if (!GROQ_API_KEY) {
-  throw new Error("❌ GROQ_API_KEY not found in .env");
+  console.error("❌ GROQ_API_KEY not found");
 }
 
-const groq = new Groq({ apiKey: GROQ_API_KEY });
+// ===============================
+// INITIALIZE GROQ
+// ===============================
 
-// ==========================================
+const groq = new Groq({
+  apiKey: GROQ_API_KEY,
+});
+
+// ===============================
 // MIDDLEWARE
-// ==========================================
+// ===============================
 
 app.use(express.json());
 
@@ -35,19 +40,9 @@ app.use(
   })
 );
 
-// ==========================================
-// UTILITY FUNCTIONS
-// ==========================================
-
-function extractJSONFromText(text) {
-  try {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]);
-    }
-  } catch (err) {}
-  return {};
-}
+// ===============================
+// HELPER FUNCTION
+// ===============================
 
 async function callGroq(messages, temperature = 0.7, max_tokens = 1000) {
   try {
@@ -60,32 +55,35 @@ async function callGroq(messages, temperature = 0.7, max_tokens = 1000) {
 
     return completion.choices[0].message.content;
   } catch (error) {
-    console.error("🔥 Groq API Error:", error.message);
+    console.error("🔥 Groq Error:", error.message);
 
-    if (error.message.toLowerCase().includes("authentication")) {
+    if (error.message?.toLowerCase().includes("authentication")) {
       throw { status: 401, message: "Invalid Groq API Key" };
     }
 
-    if (error.message.toLowerCase().includes("rate limit")) {
+    if (error.message?.toLowerCase().includes("rate limit")) {
       throw { status: 429, message: "Rate limit exceeded" };
     }
 
-    if (error.message.toLowerCase().includes("decommissioned")) {
-      throw {
-        status: 500,
-        message: "Model deprecated. Update GROQ_MODEL in .env",
-      };
-    }
-
-    throw { status: 500, message: error.message };
+    throw { status: 500, message: "Groq API failed" };
   }
 }
 
-// ==========================================
-// ROUTES
-// ==========================================
+function extractJSONFromText(text) {
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+  } catch (err) {}
+  return {};
+}
 
-// Health
+// ===============================
+// ROUTES
+// ===============================
+
+// Health Check
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy" });
 });
@@ -94,6 +92,10 @@ app.get("/api/health", (req, res) => {
 app.post("/api/extract-options", async (req, res) => {
   try {
     const { prompt } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
 
     const messages = [
       {
@@ -107,6 +109,7 @@ If not mentioned, use empty string.`,
     ];
 
     const responseText = await callGroq(messages, 0.1, 500);
+
     let extracted = extractJSONFromText(responseText);
 
     if (!Object.keys(extracted).length) {
@@ -131,6 +134,10 @@ If not mentioned, use empty string.`,
 app.post("/api/enhance-prompt", async (req, res) => {
   try {
     const { prompt, options } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
 
     const optionsText = `
 Duration: ${options?.duration || "Not specified"}
@@ -162,6 +169,7 @@ Enhance it.
     ];
 
     const enhanced = await callGroq(messages, 0.7, 1000);
+
     res.json({ enhanced_prompt: enhanced });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -172,6 +180,10 @@ Enhance it.
 app.post("/api/generate-script", async (req, res) => {
   try {
     const { prompt } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
 
     const messages = [
       {
@@ -195,16 +207,15 @@ Make it cinematic and dramatic.`,
     ];
 
     const script = await callGroq(messages, 0.8, 1500);
+
     res.json({ script });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-// ==========================================
-// START SERVER
-// ==========================================
+// ===============================
+// EXPORT FOR VERCEL (IMPORTANT)
+// ===============================
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+module.exports = app;
