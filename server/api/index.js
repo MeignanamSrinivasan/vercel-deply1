@@ -34,22 +34,22 @@ app.use(express.json());
 
 // ===== CORS CONFIG (DEV + PRODUCTION) =====
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "https://vercel-deply1-a6gl.vercel.app", // 🔥 CHANGE THIS
-];
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman / server-to-server
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      // Allow localhost
+      if (origin.includes("localhost")) {
         return callback(null, true);
-      } else {
-        return callback(new Error("CORS not allowed"));
       }
+
+      // Allow any Vercel deployment
+      if (origin.endsWith(".vercel.app")) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS not allowed"));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
