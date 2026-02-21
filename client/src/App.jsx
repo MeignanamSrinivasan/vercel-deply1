@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL ='https://vercel-deply1-dcuswgijs-meignanamsrinivasans-projects.vercel.app/api';
+const API_BASE_URL ='https://vercel-deply1.vercel.app/api';
 
 function App() {
   const [prompt, setPrompt] = useState('');
