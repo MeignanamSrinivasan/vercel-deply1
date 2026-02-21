@@ -5,69 +5,49 @@ const Groq = require("groq-sdk");
 
 const app = express();
 
-// =====================================
-// ENVIRONMENT VARIABLES
-// =====================================
+// ==========================================
+// ENVIRONMENT
+// ==========================================
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const PORT = process.env.PORT || 8000;
 
 if (!GROQ_API_KEY) {
-  console.error("❌ GROQ_API_KEY not found");
+  throw new Error("❌ GROQ_API_KEY not found in .env");
 }
 
-// =====================================
-// INITIALIZE GROQ
-// =====================================
+const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-const groq = new Groq({
-  apiKey: GROQ_API_KEY,
-});
-
-// =====================================
+// ==========================================
 // MIDDLEWARE
-// =====================================
+// ==========================================
 
 app.use(express.json());
 
-// ===== CORS CONFIG (DEV + PRODUCTION) =====
-
-// ===== CORS CONFIG (DEV + PRODUCTION) =====
-
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "https://YOUR-FRONTEND.vercel.app", // 🔥 CHANGE THIS
-];
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman / server-to-server
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      } else {
-        return callback(new Error("CORS not allowed"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    origin: [
+      "http://localhost:3000",
+      "https://your-frontend.vercel.app",
+    ],
     credentials: true,
   })
 );
 
-// ✅ SAFE preflight handler (no wildcard crash)
-app.use((req, res, next) => {
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  next();
-});
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
 
-// =====================================
-// HELPER FUNCTION
-// =====================================
+function extractJSONFromText(text) {
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+  } catch (err) {}
+  return {};
+}
 
 async function callGroq(messages, temperature = 0.7, max_tokens = 1000) {
   try {
@@ -80,33 +60,30 @@ async function callGroq(messages, temperature = 0.7, max_tokens = 1000) {
 
     return completion.choices[0].message.content;
   } catch (error) {
-    console.error("🔥 Groq Error:", error.message);
+    console.error("🔥 Groq API Error:", error.message);
 
-    if (error.message?.toLowerCase().includes("authentication")) {
+    if (error.message.toLowerCase().includes("authentication")) {
       throw { status: 401, message: "Invalid Groq API Key" };
     }
 
-    if (error.message?.toLowerCase().includes("rate limit")) {
+    if (error.message.toLowerCase().includes("rate limit")) {
       throw { status: 429, message: "Rate limit exceeded" };
     }
 
-    throw { status: 500, message: "Groq API failed" };
+    if (error.message.toLowerCase().includes("decommissioned")) {
+      throw {
+        status: 500,
+        message: "Model deprecated. Update GROQ_MODEL in .env",
+      };
+    }
+
+    throw { status: 500, message: error.message };
   }
 }
 
-function extractJSONFromText(text) {
-  try {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]);
-    }
-  } catch (err) {}
-  return {};
-}
-
-// =====================================
+// ==========================================
 // ROUTES
-// =====================================
+// ==========================================
 
 // Health
 app.get("/api/health", (req, res) => {
@@ -118,22 +95,25 @@ app.post("/api/extract-options", async (req, res) => {
   try {
     const { prompt } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-
     const messages = [
       {
         role: "system",
         content: `Extract video parameters from the prompt.
 Return ONLY JSON with:
-duration, language, platform, size (Landscape/Vertical/Square), category.`,
+duration, language, platform, size (Landscape/Vertical/Square), category.
+If not mentioned, use empty string.`,
       },
       { role: "user", content: prompt },
     ];
 
     const responseText = await callGroq(messages, 0.1, 500);
     let extracted = extractJSONFromText(responseText);
+
+    if (!Object.keys(extracted).length) {
+      try {
+        extracted = JSON.parse(responseText);
+      } catch {}
+    }
 
     res.json({
       duration: extracted.duration || "",
@@ -152,10 +132,6 @@ app.post("/api/enhance-prompt", async (req, res) => {
   try {
     const { prompt, options } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-
     const optionsText = `
 Duration: ${options?.duration || "Not specified"}
 Language: ${options?.language || "Not specified"}
@@ -167,17 +143,25 @@ Category: ${options?.category || "Not specified"}
     const messages = [
       {
         role: "system",
-        content: `Enhance the prompt to be cinematic and production-ready.
+        content: `You are an expert cinematic prompt engineer.
+Enhance the prompt to be highly detailed and production-ready.
 Return ONLY the enhanced prompt.`,
       },
       {
         role: "user",
-        content: `Original Prompt:\n${prompt}\n\nParameters:\n${optionsText}`,
+        content: `
+Original Prompt:
+${prompt}
+
+Parameters:
+${optionsText}
+
+Enhance it.
+`,
       },
     ];
 
     const enhanced = await callGroq(messages, 0.7, 1000);
-
     res.json({ enhanced_prompt: enhanced });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -189,48 +173,38 @@ app.post("/api/generate-script", async (req, res) => {
   try {
     const { prompt } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-
     const messages = [
       {
         role: "system",
-        content: `Generate a cinematic video script with 5-8 scenes.
+        content: `You are a professional cinematic script writer.
 
-Format:
-TITLE:
+Generate a detailed video script in this format:
+
+TITLE: [Title]
+
 SCENE 1:
 VISUAL:
 NARRATION:
 MOOD:
-DURATION:`,
+DURATION:
+
+Include 5-8 scenes.
+Make it cinematic and dramatic.`,
       },
       { role: "user", content: prompt },
     ];
 
     const script = await callGroq(messages, 0.8, 1500);
-
     res.json({ script });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-// =====================================
-// LOCAL SERVER (ONLY FOR DEVELOPMENT)
-// =====================================
+// ==========================================
+// START SERVER
+// ==========================================
 
-if (process.env.NODE_ENV !== "production") {
-  const PORT = 8000;
-
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-  });
-}
-
-// =====================================
-// EXPORT FOR VERCEL
-// =====================================
-
-module.exports = app;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
