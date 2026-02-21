@@ -37,7 +37,7 @@ app.use(express.json());
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
-  "https://YOUR-FRONTEND.vercel.app", // 🔥 CHANGE THIS
+  "vercel-deply1-a6gl-mtz2xn52b-meignanamsrinivasans-projects.vercel.app", // 🔥 CHANGE THIS
 ];
 
 app.use(
